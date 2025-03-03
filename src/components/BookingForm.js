@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios'; // Make sure to import axios
-
+import { loadStripe } from "@stripe/stripe-js";
 const BookingForm = () => {
     const [step, setStep] = useState(1);
     const [formData, setFormData] = useState({
@@ -64,11 +64,25 @@ const BookingForm = () => {
     }, []); // Empty dependency array means this runs only once when the component mounts
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
-        setFormData((prevData) => ({
-            ...prevData,
-            [name]: type === 'checkbox' ? checked : value,
-        }));
+    
+        setFormData((prevData) => {
+            const updatedData = {
+                ...prevData,
+                [name]: type === 'checkbox' ? checked : value,
+            };
+    
+            // If the selected field is medicalType (dropdown), update the charges
+            if (name === "medicalType") {
+                const selectedService = services.find((service) => service.id == value);
+                updatedData.charges = selectedService ? selectedService.charges : 0;
+            }
+    
+            return updatedData;
+        }); // ✅ Removed extra semicolon and fixed syntax
     };
+
+ 
+    
     // Function to format a date to YYYY-MM-DD format
     const formatDate = (date) => {
         const d = new Date(date);
@@ -168,70 +182,171 @@ const BookingForm = () => {
 
 
 
-    const handleConfirm = () => {
+
+    const handleConfirm = async () => {
         // Get the selected slot
         const selectedSlot = timeSlots.find((slot) => slot.selected);
         if (!selectedSlot) {
-            alert('Please select a time slot before proceeding.');
+            alert("Please select a time slot before proceeding.");
             return;
         }
-
+    
         // Split the time slot (e.g., "10:00 AM - 10:05 AM") into start and end times
-        const [fromTime, toTime] = selectedSlot.time.split(' - ');
-
-        // Create the appointment data as query parameters
-        const params = new URLSearchParams({
-            first_name: formData.firstName.trim(),
-            last_name: formData.lastName.trim(),
-            email: formData.email.trim(),
-            contact: formData.phone.trim(),
-            doctor_id: formData.clinicLocation, // From step 1
-            service_id: formData.medicalType,   // From step 1
-            date: formData.date,                // From step 2
-            from_time: fromTime,                // From step 3
-            to_time: toTime,                    // From step 3
-            payment_type: "STRIPE",             // Required by API
-            contact_type: 1                     // Required by API
-        });
-
-        // Construct the full API URL with query parameters
-        const apiUrl = `https://medics-admin.themarketingfactory.co.uk/api/booking?${params.toString()}`;
-
-        // Send the GET request
-        fetch(apiUrl, {
-            method: 'GET', // No body allowed
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        })
-            .then((response) => response.json())
-            .then((data) => {
-                if (data.success) {
-                    alert('Appointment booked successfully!');
-                    // Reset form
-                    setFormData({
-                        medicalType: '',
-                        clinicLocation: '',
-                        date: '',
-                        firstName: '',
-                        lastName: '',
-                        email: '',
-                        phone: '',
-                        taxiCouncil: '',
-                        birthYear: '',
-                        noPromotion: false,
-                        paymentType: 'depositOnly',
-                    });
-                    setStep(1);
-                } else {
-                    alert(`Booking failed: ${data.message || 'Unknown error occurred.'}`);
-                }
-            })
-            .catch((error) => {
-                console.error('Error booking appointment:', error);
-                alert('An error occurred while booking your appointment. Please try again.');
+        const [fromTime, toTime] = selectedSlot.time.split(" - ");
+    
+        // Ensure a medical type is selected
+        if (!formData.medicalType) {
+            alert("Please select a medical type.");
+            return;
+        }
+    
+        try {
+            // Step 1: Create a Stripe Payment Intent
+            const paymentResponse = await fetch("https://medics-admin.themarketingfactory.co.uk/api/create-payment-intent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    amount: formData.charges * 100, // Convert to cents
+                    currency: "usd",
+                }),
             });
+    
+            const paymentData = await paymentResponse.json();
+    
+            if (!paymentData.sessionId) {
+                alert("Error processing payment.");
+                return;
+            }
+    
+            const stripe = await loadStripe("pk_test_51QZ1PZG8tVfQhNR9NbKgvPxdhOYrMfxtrlErQ6cIIKRY7bLAOiyZ4oU7tEFrK3OB7LidLtdk05RLqVz3O0YyYeHH005bEX8W9q");
+    
+            // Redirect user to Stripe Checkout
+            const { error } = await stripe.redirectToCheckout({
+                sessionId: paymentData.sessionId,
+            });
+    
+            if (error) {
+                console.error("Stripe error:", error);
+                alert("Payment failed. Please try again.");
+                return;
+            }
+    
+            alert("Payment successful!");
+    
+            // Step 2: Proceed with Appointment Booking after successful payment
+            const params = new URLSearchParams({
+                first_name: formData.firstName.trim(),
+                last_name: formData.lastName.trim(),
+                email: formData.email.trim(),
+                contact: formData.phone.trim(),
+                doctor_id: formData.clinicLocation, // From step 1
+                service_id: formData.medicalType, // From step 1
+                date: formData.date, // From step 2
+                from_time: fromTime, // From step 3
+                to_time: toTime, // From step 3
+                payment_type: "STRIPE", // Required by API
+                contact_type: 1, // Required by API
+            });
+    
+            const apiUrl = `https://medics-admin.themarketingfactory.co.uk/api/booking?${params.toString()}`;
+    
+            const bookingResponse = await fetch(apiUrl, {
+                method: "GET",
+                headers: { "Content-Type": "application/json" },
+            });
+    
+            const bookingData = await bookingResponse.json();
+    
+            if (bookingData.success) {
+                alert("Appointment booked successfully!");
+                // Reset form
+                setFormData({
+                    medicalType: "",
+                    clinicLocation: "",
+                    date: "",
+                    firstName: "",
+                    lastName: "",
+                    email: "",
+                    phone: "",
+                    taxiCouncil: "",
+                    birthYear: "",
+                    noPromotion: false,
+                    paymentType: "depositOnly",
+                });
+                setStep(1);
+            } else {
+                alert(`Booking failed: ${bookingData.message || "Unknown error occurred."}`);
+            }
+        } catch (error) {
+            console.error("Error:", error);
+            alert("An error occurred. Please try again.");
+        }
     };
+    
+    // const handleConfirm = () => {
+    //     // Get the selected slot
+    //     const selectedSlot = timeSlots.find((slot) => slot.selected);
+    //     if (!selectedSlot) {
+    //         alert('Please select a time slot before proceeding.');
+    //         return;
+    //     }
+
+    //     // Split the time slot (e.g., "10:00 AM - 10:05 AM") into start and end times
+    //     const [fromTime, toTime] = selectedSlot.time.split(' - ');
+
+    //     // Create the appointment data as query parameters
+    //     const params = new URLSearchParams({
+    //         first_name: formData.firstName.trim(),
+    //         last_name: formData.lastName.trim(),
+    //         email: formData.email.trim(),
+    //         contact: formData.phone.trim(),
+    //         doctor_id: formData.clinicLocation, // From step 1
+    //         service_id: formData.medicalType,   // From step 1
+    //         date: formData.date,                // From step 2
+    //         from_time: fromTime,                // From step 3
+    //         to_time: toTime,                    // From step 3
+    //         payment_type: "STRIPE",             // Required by API
+    //         contact_type: 1                     // Required by API
+    //     });
+
+    //     // Construct the full API URL with query parameters
+    //     const apiUrl = `https://medics-admin.themarketingfactory.co.uk/api/booking?${params.toString()}`;
+
+    //     // Send the GET request
+    //     fetch(apiUrl, {
+    //         method: 'GET', // No body allowed
+    //         headers: {
+    //             'Content-Type': 'application/json',
+    //         },
+    //     })
+    //         .then((response) => response.json())
+    //         .then((data) => {
+    //             if (data.success) {
+    //                 alert('Appointment booked successfully!');
+    //                 // Reset form
+    //                 setFormData({
+    //                     medicalType: '',
+    //                     clinicLocation: '',
+    //                     date: '',
+    //                     firstName: '',
+    //                     lastName: '',
+    //                     email: '',
+    //                     phone: '',
+    //                     taxiCouncil: '',
+    //                     birthYear: '',
+    //                     noPromotion: false,
+    //                     paymentType: 'depositOnly',
+    //                 });
+    //                 setStep(1);
+    //             } else {
+    //                 alert(`Booking failed: ${data.message || 'Unknown error occurred.'}`);
+    //             }
+    //         })
+    //         .catch((error) => {
+    //             console.error('Error booking appointment:', error);
+    //             alert('An error occurred while booking your appointment. Please try again.');
+    //         });
+    // };
 
     return (
         <div className="container mt-5 mb-5">

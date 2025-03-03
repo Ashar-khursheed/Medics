@@ -20,8 +20,9 @@
 import React from "react";
 
 const Map = ({ latitude, longitude }) => {
-  const apiKey = "AIzaSyAiUmisrarh427LJ3KRIVQ6dgMO8e8drCs"; // Your API key (consider securing it)
-    const mapUrl = `https://www.google.com/maps/embed/v1/place?key=${apiKey}&q=${latitude},${longitude}`;
+  console.log("API Key:", process.env.REACT_APP_GOOGLE_MAPS_API_KEY); // Debugging
+  const apiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "YOUR_DEFAULT_API_KEY";
+      const mapUrl = `https://www.google.com/maps/embed/v1/place?key=${apiKey}&q=${latitude},${longitude}`;
   
     return (
       <div className="responsive-map">
