@@ -184,24 +184,50 @@ const BookingForm = () => {
 
 
     const handleConfirm = async () => {
-        // Get the selected slot
         const selectedSlot = timeSlots.find((slot) => slot.selected);
         if (!selectedSlot) {
             alert("Please select a time slot before proceeding.");
             return;
         }
     
-        // Split the time slot (e.g., "10:00 AM - 10:05 AM") into start and end times
         const [fromTime, toTime] = selectedSlot.time.split(" - ");
     
-        // Ensure a medical type is selected
         if (!formData.medicalType) {
             alert("Please select a medical type.");
             return;
         }
     
         try {
-            // Step 1: Create a Stripe Payment Intent
+            // Step 1: Book the Appointment first (no alert yet)
+            const params = new URLSearchParams({
+                first_name: formData.firstName.trim(),
+                last_name: formData.lastName.trim(),
+                email: formData.email.trim(),
+                contact: formData.phone.trim(),
+                doctor_id: formData.clinicLocation, // From step 1
+                service_id: formData.medicalType, // From step 1
+                date: formData.date, // From step 2
+                from_time: fromTime, // From step 3
+                to_time: toTime, // From step 3
+                payment_type: "STRIPE", // We'll mark it as 'STRIPE' even if payment hasn't happened yet
+                contact_type: 1, // Required by API
+            });
+    
+            const apiUrl = `https://medics-admin.themarketingfactory.co.uk/api/booking?${params.toString()}`;
+    
+            const bookingResponse = await fetch(apiUrl, {
+                method: "GET",
+                headers: { "Content-Type": "application/json" },
+            });
+    
+            const bookingData = await bookingResponse.json();
+    
+            if (!bookingData.success) {
+                alert(`Booking failed: ${bookingData.message || "Unknown error occurred."}`);
+                return;
+            }
+    
+            // Step 2: Proceed with Stripe Payment (Redirect to Stripe Checkout)
             const paymentResponse = await fetch("https://medics-admin.themarketingfactory.co.uk/api/create-payment-intent", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -227,61 +253,25 @@ const BookingForm = () => {
     
             if (error) {
                 console.error("Stripe error:", error);
-                alert("Payment failed. Please try again.");
+                alert("Payment failed. You can still continue with the appointment.");
                 return;
             }
     
-            alert("Payment successful!");
+            // After Stripe payment completion (successful or not), handle the alert
     
-            // Step 2: Proceed with Appointment Booking after successful payment
-            const params = new URLSearchParams({
-                first_name: formData.firstName.trim(),
-                last_name: formData.lastName.trim(),
-                email: formData.email.trim(),
-                contact: formData.phone.trim(),
-                doctor_id: formData.clinicLocation, // From step 1
-                service_id: formData.medicalType, // From step 1
-                date: formData.date, // From step 2
-                from_time: fromTime, // From step 3
-                to_time: toTime, // From step 3
-                payment_type: "STRIPE", // Required by API
-                contact_type: 1, // Required by API
-            });
+            // Assuming you have a success or failure URL from Stripe to handle the result on your frontend:
     
-            const apiUrl = `https://medics-admin.themarketingfactory.co.uk/api/booking?${params.toString()}`;
+            // Redirect user to home page after payment (if successful)
+            window.location.href = "/home"; // or use the success URL provided by Stripe
     
-            const bookingResponse = await fetch(apiUrl, {
-                method: "GET",
-                headers: { "Content-Type": "application/json" },
-            });
+            // On the home page (or wherever the user returns after payment), you can show an alert based on the payment status
     
-            const bookingData = await bookingResponse.json();
-    
-            if (bookingData.success) {
-                alert("Appointment booked successfully!");
-                // Reset form
-                setFormData({
-                    medicalType: "",
-                    clinicLocation: "",
-                    date: "",
-                    firstName: "",
-                    lastName: "",
-                    email: "",
-                    phone: "",
-                    taxiCouncil: "",
-                    birthYear: "",
-                    noPromotion: false,
-                    paymentType: "depositOnly",
-                });
-                setStep(1);
-            } else {
-                alert(`Booking failed: ${bookingData.message || "Unknown error occurred."}`);
-            }
         } catch (error) {
             console.error("Error:", error);
             alert("An error occurred. Please try again.");
         }
     };
+    
     
     // const handleConfirm = () => {
     //     // Get the selected slot
